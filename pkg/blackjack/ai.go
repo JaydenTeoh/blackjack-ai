@@ -53,7 +53,7 @@ func (ai playerAI) Play(hand []deck.Card, dealer deck.Card) Move {
 	for {
 		fmt.Println("Player:", hand)
 		fmt.Println("Dealer:", dealer, "**HIDDEN**")
-		fmt.Println("What will you do? h - hit, s - stand")
+		fmt.Println("What will you do? h - hit, s - stand, d - double down")
 		var input string
 		fmt.Scanf("%s\n", &input)
 		switch input {
@@ -61,6 +61,8 @@ func (ai playerAI) Play(hand []deck.Card, dealer deck.Card) Move {
 			return MoveHit
 		case "s":
 			return MoveStand
+		case "d":
+			return MoveDouble
 		default:
 			fmt.Println("Invalid option - Enter 'h' to hit or 's' to stand.")
 		}

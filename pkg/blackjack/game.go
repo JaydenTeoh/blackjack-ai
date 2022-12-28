@@ -1,6 +1,7 @@
 package blackjack
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/JaydenTeoh/card-deck/pkg/deck"
@@ -112,7 +113,18 @@ func (g *Game) Play(ai AI) int {
 			hand := make([]deck.Card, len(g.player))
 			copy(hand, g.player)
 			move := ai.Play(hand, g.dealer[0])
-			move(g)
+			err := move(g)
+			switch err {
+			case errBust:
+				MoveStand(g)
+			case errInvalidDouble:
+				fmt.Println(err)
+				continue
+			case nil:
+				//noop
+			default:
+				panic(err)
+			}
 		}
 
 		//Dealer Turn
@@ -128,20 +140,36 @@ func (g *Game) Play(ai AI) int {
 	return g.balance
 }
 
-type Move func(*Game)
+var (
+	errBust          = errors.New("Busted!")
+	errInvalidDouble = errors.New("Can only double on a hand with 2 cards!")
+)
 
-func MoveHit(g *Game) {
+type Move func(*Game) error
+
+func MoveHit(g *Game) error {
 	hand := g.currentHand()
 	var card deck.Card
 	card, g.deck = draw(g.deck)
 	*hand = append(*hand, card)
 	if Score(*hand...) > 21 {
-		MoveStand(g)
+		return errBust
 	}
+	return nil
 }
 
-func MoveStand(g *Game) {
+func MoveDouble(g *Game) error {
+	if len(g.player) != 2 {
+		return errInvalidDouble
+	}
+	g.playerBet *= 2
+	MoveHit(g)
+	return MoveStand(g)
+}
+
+func MoveStand(g *Game) error {
 	g.state++
+	return nil
 }
 
 // draw the top card of the deck
