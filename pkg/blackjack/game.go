@@ -8,12 +8,31 @@ import (
 
 type state int8
 
-func New() Game {
-	return Game{
+type Options struct {
+	Decks           int
+	Hands           int
+	BlackjackPayout float64
+}
+
+func New(opts Options) Game {
+	g := Game{
 		state:    statePlayerTurn,
 		dealerAI: dealerAI{},
 		balance:  0,
 	}
+	if opts.Decks == 0 {
+		opts.Decks = 3
+	}
+	if opts.Hands == 0 {
+		opts.Hands = 10
+	}
+	if opts.BlackjackPayout == 0.0 {
+		opts.BlackjackPayout = 1.5
+	}
+	g.numDecks = opts.Decks
+	g.numHands = opts.Hands
+	g.blackjackPayout = opts.BlackjackPayout
+	return g
 }
 
 const (
@@ -23,13 +42,20 @@ const (
 )
 
 type Game struct {
-	//unexported fields
-	deck     []deck.Card
-	state    state
-	player   []deck.Card
+	//configurations
+	numDecks        int
+	numHands        int
+	blackjackPayout float64
+	//game states
+	state state
+	deck  []deck.Card
+	//player fields
+	player    []deck.Card
+	playerBet int
+	balance   int
+	//dealer fields
 	dealer   []deck.Card
 	dealerAI AI
-	balance  int
 }
 
 func (g *Game) currentHand() *[]deck.Card {
@@ -41,6 +67,11 @@ func (g *Game) currentHand() *[]deck.Card {
 	default:
 		panic("It isn't currently any player's turn.")
 	}
+}
+
+func bet(g *Game, ai AI, shuffled bool) {
+	bet := ai.Bet(shuffled)
+	g.playerBet = bet
 }
 
 func deal(g *Game) {
@@ -57,10 +88,18 @@ func deal(g *Game) {
 }
 
 func (g *Game) Play(ai AI) int {
-	g.deck = deck.New(deck.Deck(3), deck.Shuffle) //create a shuffled three-deck game (156 cards)
+	g.deck = nil
+	min := 52 * g.numDecks / 3 // arbitrary card number to signal that deck is running low
 
-	//10 rounds of Blackjack
-	for i := 0; i < 2; i++ {
+	//numHands rounds of Blackjack
+	for i := 0; i < g.numHands; i++ {
+		shuffled := false
+		if len(g.deck) < min {
+			g.deck = deck.New(deck.Deck(g.numDecks), deck.Shuffle) //create a shuffled n-decks game everytime cards run low (< min)
+			shuffled = true
+		}
+		bet(g, ai, shuffled)
+
 		deal(g)
 
 		//Player Turn
@@ -145,22 +184,23 @@ func min(a, b int) int {
 
 func endHand(g *Game, ai AI) {
 	pScore, dScore := Score(g.player...), Score(g.dealer...)
+	winnings := g.playerBet //amount that can be won per round (how much player bet)
 	switch {
 	case pScore > 21:
 		fmt.Println("You busted.")
-		g.balance--
+		winnings = -winnings //lose bet
 	case dScore > 21:
 		fmt.Println("Dealer busted.")
-		g.balance++
 	case pScore > dScore:
 		fmt.Println("You win!")
-		g.balance++
 	case dScore > pScore:
 		fmt.Println("You lose.")
-		g.balance--
+		winnings = -winnings //lose bet
 	case dScore == pScore:
 		fmt.Println("Draw.")
+		winnings = 0 //no winnings
 	}
+	g.balance += winnings
 	fmt.Println()
 	ai.Results([][]deck.Card{g.player}, g.dealer)
 	g.player = nil
