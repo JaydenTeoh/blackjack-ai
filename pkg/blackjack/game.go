@@ -275,32 +275,24 @@ func endRound(g *Game, ai AI) {
 		pScore, pBlackjack := Score(cards...), Blackjack(cards...)
 		switch {
 		case pBlackjack && dBlackjack:
-			fmt.Println("Draw.")
 			winnings = 0 //no winnings
 		case dBlackjack:
-			fmt.Println("You lose.")
 			winnings = -winnings //lose bet
 		case pBlackjack:
-			fmt.Println("BLACKJACK!")
 			winnings = int(float64(winnings) * g.blackjackPayout) //win bet * blackjack payout
 		case pScore > 21:
-			fmt.Println("You busted.")
 			winnings = -winnings //lose bet
 		case dScore > 21:
-			fmt.Println("Dealer busted.") //win bet
+			//win bet
 		case pScore > dScore:
-			fmt.Println("You win!") //win bet
+			//win bet
 		case dScore > pScore:
-			fmt.Println("You lose.")
 			winnings = -winnings //lose bet
 		case dScore == pScore:
-			fmt.Println("Draw.")
 			winnings = 0 //no winnings
 		}
 		g.balance += winnings
 	}
-
-	fmt.Println()
 	ai.Results(allHands, g.dealer)
 	g.player = nil
 	g.dealer = nil
