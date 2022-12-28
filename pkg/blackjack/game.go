@@ -51,7 +51,8 @@ type Game struct {
 	state state
 	deck  []deck.Card
 	//player fields
-	player    []deck.Card
+	player    []hand //player can have multiple hands => splitting
+	handId    int    //each hand of the player has an identifiable index
 	playerBet int
 	balance   int
 	//dealer fields
@@ -59,10 +60,15 @@ type Game struct {
 	dealerAI AI
 }
 
+type hand struct {
+	cards []deck.Card
+	bet   int
+}
+
 func (g *Game) currentHand() *[]deck.Card {
 	switch g.state {
 	case statePlayerTurn:
-		return &g.player
+		return &g.player[g.handId].cards
 	case stateDealerTurn:
 		return &g.dealer
 	default:
@@ -72,18 +78,28 @@ func (g *Game) currentHand() *[]deck.Card {
 
 func bet(g *Game, ai AI, shuffled bool) {
 	bet := ai.Bet(shuffled)
+	if bet < 100 {
+		panic("bet must be at least 100")
+	}
 	g.playerBet = bet
 }
 
 func deal(g *Game) {
-	g.player = make([]deck.Card, 0, 5)
+	playerHand := make([]deck.Card, 0, 5)
+	g.handId = 0
 	g.dealer = make([]deck.Card, 0, 5)
 	var card deck.Card
 	for i := 0; i < 2; i++ {
 		card, g.deck = draw(g.deck)
-		g.player = append(g.player, card)
+		playerHand = append(playerHand, card)
 		card, g.deck = draw(g.deck)
 		g.dealer = append(g.dealer, card)
+	}
+	g.player = []hand{
+		{
+			cards: playerHand,
+			bet:   g.playerBet,
+		},
 	}
 	g.state = statePlayerTurn
 }
@@ -104,14 +120,14 @@ func (g *Game) Play(ai AI) int {
 
 		//check if dealer has hit Blackjack prematurely
 		if Blackjack(g.dealer...) {
-			endHand(g, ai)
+			endRound(g, ai)
 			continue
 		}
 
 		//Player Turn
 		for g.state == statePlayerTurn {
-			hand := make([]deck.Card, len(g.player))
-			copy(hand, g.player)
+			hand := make([]deck.Card, len(*g.currentHand()))
+			copy(hand, *g.currentHand())
 			move := ai.Play(hand, g.dealer[0])
 			err := move(g)
 			switch err {
@@ -135,7 +151,7 @@ func (g *Game) Play(ai AI) int {
 			move(g)
 		}
 
-		endHand(g, ai)
+		endRound(g, ai)
 	}
 	return g.balance
 }
@@ -143,6 +159,7 @@ func (g *Game) Play(ai AI) int {
 var (
 	errBust          = errors.New("Busted!")
 	errInvalidDouble = errors.New("Can only double on a hand with 2 cards!")
+	errInvalidSplit  = errors.New("Can only split with two cards in your hands!")
 )
 
 type Move func(*Game) error
@@ -159,7 +176,7 @@ func MoveHit(g *Game) error {
 }
 
 func MoveDouble(g *Game) error {
-	if len(g.player) != 2 {
+	if len(*g.currentHand()) != 2 {
 		return errInvalidDouble
 	}
 	g.playerBet *= 2
@@ -167,9 +184,36 @@ func MoveDouble(g *Game) error {
 	return MoveStand(g)
 }
 
-func MoveStand(g *Game) error {
-	g.state++
+func MoveSplit(g *Game) error {
+	cards := g.currentHand()
+	if len(*cards) != 2 {
+		return errInvalidSplit
+	}
+	if (*cards)[0].Rank != (*cards)[1].Rank {
+		return errors.New("both cards must have the same rank to split")
+	}
+	g.player = append(g.player, hand{
+		cards: []deck.Card{((*cards)[1])},
+		bet:   g.player[g.handId].bet,
+	})
+	g.player[g.handId].cards = (*cards)[:1]
 	return nil
+}
+
+func MoveStand(g *Game) error {
+	if g.state == stateDealerTurn {
+		g.state++
+		return nil
+	}
+	if g.state == statePlayerTurn {
+		g.handId++
+		// if player has no more hands to play
+		if g.handId == len(g.player) {
+			g.state++
+		}
+		return nil
+	}
+	return errors.New("invalid state")
 }
 
 // draw the top card of the deck
@@ -220,37 +264,44 @@ func min(a, b int) int {
 	return b
 }
 
-func endHand(g *Game, ai AI) {
-	pScore, dScore := Score(g.player...), Score(g.dealer...)
-	pBlackjack, dBlackjack := Blackjack(g.player...), Blackjack(g.dealer...)
-	winnings := g.playerBet //amount that can be won per round (how much player bet)
-	switch {
-	case pBlackjack && dBlackjack:
-		fmt.Println("Draw.")
-		winnings = 0 //no winnings
-	case dBlackjack:
-		fmt.Println("You lose.")
-		winnings = -winnings //lose bet
-	case pBlackjack:
-		fmt.Println("BLACKJACK!")
-		winnings = int(float64(winnings) * g.blackjackPayout) //win bet * blackjack payout
-	case pScore > 21:
-		fmt.Println("You busted.")
-		winnings = -winnings //lose bet
-	case dScore > 21:
-		fmt.Println("Dealer busted.") //win bet
-	case pScore > dScore:
-		fmt.Println("You win!") //win bet
-	case dScore > pScore:
-		fmt.Println("You lose.")
-		winnings = -winnings //lose bet
-	case dScore == pScore:
-		fmt.Println("Draw.")
-		winnings = 0 //no winnings
+func endRound(g *Game, ai AI) {
+	dScore := Score(g.dealer...)
+	dBlackjack := Blackjack(g.dealer...)
+	allHands := make([][]deck.Card, len(g.player))
+	for index, hand := range g.player {
+		cards := hand.cards
+		allHands[index] = cards
+		winnings := hand.bet
+		pScore, pBlackjack := Score(cards...), Blackjack(cards...)
+		switch {
+		case pBlackjack && dBlackjack:
+			fmt.Println("Draw.")
+			winnings = 0 //no winnings
+		case dBlackjack:
+			fmt.Println("You lose.")
+			winnings = -winnings //lose bet
+		case pBlackjack:
+			fmt.Println("BLACKJACK!")
+			winnings = int(float64(winnings) * g.blackjackPayout) //win bet * blackjack payout
+		case pScore > 21:
+			fmt.Println("You busted.")
+			winnings = -winnings //lose bet
+		case dScore > 21:
+			fmt.Println("Dealer busted.") //win bet
+		case pScore > dScore:
+			fmt.Println("You win!") //win bet
+		case dScore > pScore:
+			fmt.Println("You lose.")
+			winnings = -winnings //lose bet
+		case dScore == pScore:
+			fmt.Println("Draw.")
+			winnings = 0 //no winnings
+		}
+		g.balance += winnings
 	}
-	g.balance += winnings
+
 	fmt.Println()
-	ai.Results([][]deck.Card{g.player}, g.dealer)
+	ai.Results(allHands, g.dealer)
 	g.player = nil
 	g.dealer = nil
 }
