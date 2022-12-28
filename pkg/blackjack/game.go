@@ -99,8 +99,13 @@ func (g *Game) Play(ai AI) int {
 			shuffled = true
 		}
 		bet(g, ai, shuffled)
-
 		deal(g)
+
+		//check if dealer has hit Blackjack prematurely
+		if Blackjack(g.dealer...) {
+			endHand(g, ai)
+			continue
+		}
 
 		//Player Turn
 		for g.state == statePlayerTurn {
@@ -167,6 +172,11 @@ func Score(hand ...deck.Card) int {
 	return minScore
 }
 
+// Returns true if player hits a blackjack
+func Blackjack(hand ...deck.Card) bool {
+	return len(hand) == 2 && Score(hand...) == 21
+}
+
 func minScore(hand ...deck.Card) int {
 	score := 0
 	for _, c := range hand {
@@ -184,15 +194,25 @@ func min(a, b int) int {
 
 func endHand(g *Game, ai AI) {
 	pScore, dScore := Score(g.player...), Score(g.dealer...)
+	pBlackjack, dBlackjack := Blackjack(g.player...), Blackjack(g.dealer...)
 	winnings := g.playerBet //amount that can be won per round (how much player bet)
 	switch {
+	case pBlackjack && dBlackjack:
+		fmt.Println("Draw.")
+		winnings = 0 //no winnings
+	case dBlackjack:
+		fmt.Println("You lose.")
+		winnings = -winnings //lose bet
+	case pBlackjack:
+		fmt.Println("BLACKJACK!")
+		winnings = int(float64(winnings) * g.blackjackPayout) //win bet * blackjack payout
 	case pScore > 21:
 		fmt.Println("You busted.")
 		winnings = -winnings //lose bet
 	case dScore > 21:
-		fmt.Println("Dealer busted.")
+		fmt.Println("Dealer busted.") //win bet
 	case pScore > dScore:
-		fmt.Println("You win!")
+		fmt.Println("You win!") //win bet
 	case dScore > pScore:
 		fmt.Println("You lose.")
 		winnings = -winnings //lose bet
